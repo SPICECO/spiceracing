@@ -1,0 +1,95 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+---
+
+<Layout title="Newsletter">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">SpiceCo Newsletter</Fragment>
+      <Fragment slot="desc">Join the collective. Get real-time alerts on exclusive drops, apparel launches, and community races.</Fragment>
+    </Sectionhead>
+
+    <div class="max-w-md mx-auto mt-16">
+      <div class="border border-slate-200 rounded-2xl p-8 shadow-sm bg-white relative overflow-hidden group">
+        <h3 class="text-lg font-bold text-gray-800 mb-2">Subscribe</h3>
+        <p class="text-xs text-slate-500 mb-6 leading-relaxed">
+          Enter your email below to subscribe to the SpiceCo feed. We only send critical updates on apparel drops and live racing events.
+        </p>
+
+        <form id="newsletter-form" class="space-y-4">
+          <div>
+            <label for="email" class="sr-only">Email Address</label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              required
+              placeholder="enter email to join newsletter"
+              class="w-full bg-slate-50 border border-slate-200 focus:border-black focus:ring-1 focus:ring-black rounded-lg py-3 px-4 text-sm text-gray-800 placeholder-slate-400 outline-none transition-all duration-300 shadow-inner"
+            />
+          </div>
+          
+          <div id="newsletter-message" class="text-xs font-semibold py-2 px-3 rounded-lg hidden"></div>
+
+          <button
+            type="submit"
+            id="newsletter-submit-btn"
+            class="w-full bg-black hover:bg-slate-800 text-white font-semibold py-3 px-4 rounded-lg shadow-sm transition-all duration-300 text-sm"
+          >
+            Join the Feed
+          </button>
+        </form>
+
+        <div class="mt-6 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100 pt-4 font-mono">
+          <span>Powered by Supabase DB</span>
+          <span>Unsubscribe anytime</span>
+        </div>
+      </div>
+    </div>
+  </Container>
+</Layout>
+
+<script>
+  const form = document.getElementById('newsletter-form');
+  const emailInput = document.getElementById('email');
+  const submitBtn = document.getElementById('newsletter-submit-btn');
+  const messageEl = document.getElementById('newsletter-message');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Joining...';
+    messageEl.classList.add('hidden');
+
+    try {
+      const res = await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email: emailInput.value })
+      });
+
+      const result = await res.json();
+
+      if (res.ok && result.success) {
+        messageEl.innerText = result.message || 'Successfully subscribed!';
+        messageEl.className = 'text-xs font-semibold py-2 px-3 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-250 block';
+        submitBtn.innerText = 'Joined!';
+        emailInput.value = '';
+      } else {
+        messageEl.innerText = result.message || 'Subscription failed.';
+        messageEl.className = 'text-xs font-semibold py-2 px-3 rounded-lg bg-red-50 text-red-700 border border-red-250 block';
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Join the Feed';
+      }
+    } catch (err) {
+      messageEl.innerText = 'Network error. Please try again.';
+      messageEl.className = 'text-xs font-semibold py-2 px-3 rounded-lg bg-red-50 text-red-700 border border-red-250 block';
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Join the Feed';
+    }
+  });
+</script>

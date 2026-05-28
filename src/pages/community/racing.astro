@@ -1,0 +1,409 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+import { fetchRssFeed } from "@/utils/rss";
+import { supabaseAdmin } from "@/lib/supabase";
+
+// 1. Fetch and parse iCal events from Google Calendar
+function parseICS(icsText) {
+  const events = [];
+  const rawLines = icsText.split(/\r?\n/);
+  const lines = [];
+  
+  // Unfold lines
+  for (let line of rawLines) {
+    if (line.startsWith(' ') || line.startsWith('\t')) {
+      if (lines.length > 0) {
+        lines[lines.length - 1] += line.substring(1);
+      }
+    } else {
+      lines.push(line);
+    }
+  }
+
+  let currentEvent = null;
+
+  for (let line of lines) {
+    line = line.trim();
+    if (line === 'BEGIN:VEVENT') {
+      currentEvent = {};
+    } else if (line === 'END:VEVENT') {
+      if (currentEvent) {
+        events.push(currentEvent);
+        currentEvent = null;
+      }
+    } else if (currentEvent) {
+      if (line.startsWith('SUMMARY:')) {
+        currentEvent.summary = line.substring(8).replace(/\\,/g, ',');
+      } else if (line.startsWith('DTSTART')) {
+        const parts = line.split(':');
+        if (parts.length >= 2) {
+          const dateStr = parts[1];
+          currentEvent.startStr = dateStr;
+          
+          if (dateStr.length >= 8) {
+            const year = parseInt(dateStr.substring(0, 4), 10);
+            const month = parseInt(dateStr.substring(4, 6), 10);
+            const day = parseInt(dateStr.substring(6, 8), 10);
+            
+            let dateVal;
+            if (dateStr.includes('T')) {
+              const hour = parseInt(dateStr.substring(9, 11), 10);
+              const min = parseInt(dateStr.substring(11, 13), 10);
+              const sec = parseInt(dateStr.substring(13, 15), 10);
+              dateVal = new Date(Date.UTC(year, month - 1, day, hour, min, sec));
+            } else {
+              dateVal = new Date(year, month - 1, day);
+            }
+            currentEvent.startDate = dateVal;
+          }
+        }
+      } else if (line.startsWith('LOCATION:')) {
+        currentEvent.location = line.substring(9).replace(/\\,/g, ',').replace(/\\n/g, '\n');
+      }
+    }
+  }
+  return events;
+}
+
+let icsEvents = [];
+try {
+  const icsRes = await fetch("https://calendar.google.com/calendar/ical/b9a4dc690cba97af9a9919f8029b67ffe8c66fcc1c61c8466255ee29be22ef8c%40group.calendar.google.com/public/basic.ics");
+  if (icsRes.ok) {
+    const icsText = await icsRes.text();
+    icsEvents = parseICS(icsText);
+  }
+} catch (e) {
+  console.error("Error fetching Google Calendar ICS file:", e);
+}
+
+// Filter Google Calendar events for summaries containing "CUP"
+const cupEvents = icsEvents.filter(e => 
+  e.summary && e.summary.toUpperCase().includes("CUP")
+);
+
+// 2. Fetch calendar events from RSS feed
+const calendarEvents = await fetchRssFeed("https://www.artformatics.com/api/boards/kalender-chkso/rss");
+
+// 3. Fetch races and registrations from database
+const { data: dbRaces } = await supabaseAdmin
+  .from('races')
+  .select('*');
+
+const { data: registrations } = await supabaseAdmin
+  .from('race_registrations')
+  .select(`
+    registration_id,
+    registration_status,
+    registration_date,
+    participants (
+      participant_id,
+      first_name,
+      last_name,
+      country,
+      club_team,
+      nationality
+    ),
+    races (
+      race_id,
+      race_name
+    )
+  `)
+  .order('registration_date', { ascending: false });
+
+// Map Google Calendar Cup events to details
+const activeRaces = cupEvents.map(icsEvent => {
+  const matchedDbRace = dbRaces?.find(r => r.race_name.toUpperCase() === icsEvent.summary.toUpperCase());
+  
+  // Format date nicely
+  let formattedDate = 'TBD';
+  if (icsEvent.startDate) {
+    formattedDate = new Date(icsEvent.startDate).toLocaleDateString('en-US', {
+      dateStyle: 'medium'
+    });
+  }
+
+  return {
+    name: icsEvent.summary,
+    date: formattedDate,
+    rawDate: icsEvent.startDate,
+    location: icsEvent.location || matchedDbRace?.location || "TBD Circuit",
+    distance: matchedDbRace?.distance_km ? `${matchedDbRace.distance_km} km` : "TBD",
+    type: matchedDbRace?.race_type || "Cup Race",
+    fee: "5 €",
+    status: matchedDbRace?.status || "planned"
+  };
+});
+
+// Sort races: closest/earliest date first
+activeRaces.sort((a, b) => {
+  if (!a.rawDate) return 1;
+  if (!b.rawDate) return -1;
+  return new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime();
+});
+
+// Format standings from database registrations
+const standings = (registrations || []).map((reg, idx) => {
+  const p = reg.participants || {};
+  const r = reg.races || {};
+  return {
+    pos: idx + 1,
+    name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Anonymous Driver',
+    country: p.country || p.nationality || 'TBD',
+    team: p.club_team || 'Independent',
+    event: r.race_name || 'General Registry',
+    status: reg.registration_status || 'registered',
+    date: reg.registration_date ? new Date(reg.registration_date).toLocaleDateString('en-US', { dateStyle: 'short' }) : 'N/A'
+  };
+});
+---
+
+<Layout title="Racing">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">SpiceCo Racing</Fragment>
+      <Fragment slot="desc">High-octane motorsport events and active leaderboards.</Fragment>
+    </Sectionhead>
+
+    <!-- Upcoming Races -->
+    <div class="mt-16">
+      <h2 class="text-2xl font-bold border-b border-slate-100 pb-2 mb-8 text-gray-800">Active & Planned Cup Races</h2>
+      {activeRaces.length === 0 ? (
+        <p class="text-center text-slate-500 py-12">No active Cup races found in the calendar.</p>
+      ) : (
+        <div class="grid md:grid-cols-3 gap-6">
+          {activeRaces.map((race) => (
+            <div class="border border-slate-200 rounded-xl p-6 hover:shadow-md transition-all duration-300 relative overflow-hidden group bg-white">
+              <div class="absolute top-0 right-0 p-3">
+                <span class={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                  race.status === 'active' 
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                    : 'bg-blue-50 text-blue-700 border border-blue-200'
+                }`}>
+                  {race.status}
+                </span>
+              </div>
+              <div class="text-xs text-orange-650 font-semibold tracking-widest uppercase mb-1">{race.type}</div>
+              <h3 class="text-xl font-bold text-gray-800 group-hover:text-orange-600 transition-colors">{race.name}</h3>
+              <div class="mt-4 space-y-2 text-sm text-slate-600">
+                <div class="flex justify-between gap-4"><span class="text-slate-400 shrink-0">Date:</span><span class="text-right">{race.date}</span></div>
+                <div class="flex justify-between gap-4"><span class="text-slate-400 shrink-0">Location:</span><span class="text-right">{race.location}</span></div>
+                <div class="flex justify-between gap-4"><span class="text-slate-400 shrink-0">Distance:</span><span class="text-right">{race.distance}</span></div>
+                <div class="flex justify-between gap-4"><span class="text-slate-400 shrink-0">Entry Fee:</span><span class="text-right">{race.fee}</span></div>
+              </div>
+              <div class="mt-6">
+                <button 
+                  class="register-btn w-full bg-black hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition-all duration-300 text-sm"
+                  data-race-name={race.name}
+                  data-race-date={race.rawDate}
+                >
+                  Register Now
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
+    <!-- Leaderboards -->
+    <div class="mt-20">
+      <h2 class="text-2xl font-bold border-b border-slate-100 pb-2 mb-8 text-gray-800">Active Driver Standings</h2>
+      <div class="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-sm">
+        {standings.length === 0 ? (
+          <p class="text-center text-slate-500 py-12">No drivers are currently enlisted in the standings.</p>
+        ) : (
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-slate-200 text-xs text-slate-500 font-semibold uppercase tracking-wider bg-slate-50">
+                <th class="p-4">Pos</th>
+                <th class="p-4">Driver</th>
+                <th class="p-4">Team</th>
+                <th class="p-4">Registered Event</th>
+                <th class="p-4">Country</th>
+                <th class="p-4">Enlist Date</th>
+                <th class="p-4 text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-sm text-slate-700">
+              {standings.map((row) => (
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="p-4 font-bold">
+                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200">
+                      {row.pos}
+                    </span>
+                  </td>
+                  <td class="p-4 font-semibold text-gray-800">{row.name}</td>
+                  <td class="p-4 text-slate-600">{row.team}</td>
+                  <td class="p-4 text-indigo-600 font-medium">{row.event}</td>
+                  <td class="p-4 text-slate-500">{row.country}</td>
+                  <td class="p-4 font-mono text-slate-550">{row.date}</td>
+                  <td class="p-4 text-right">
+                    <span class={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
+                      row.status === 'registered' 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-250' 
+                        : 'bg-slate-50 text-slate-700 border-slate-250'
+                    }`}>
+                      {row.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  </Container>
+
+  <!-- Registration Dialog Modal -->
+  <dialog id="register-modal" class="backdrop:bg-black/50 border border-slate-250 rounded-2xl shadow-2xl max-w-md w-full p-8 bg-white outline-none">
+    <div class="flex justify-between items-center mb-6">
+      <h3 class="text-lg font-bold text-gray-800">Enlist for Race</h3>
+      <button id="close-modal-btn" class="text-slate-400 hover:text-gray-805 text-xl font-bold">&times;</button>
+    </div>
+    
+    <div id="modal-event-details" class="mb-6 p-4 bg-slate-50 border border-slate-100 rounded-lg text-xs space-y-1 text-slate-650">
+      <div><strong>Event:</strong> <span id="modal-race-name"></span></div>
+      <div><strong>Date:</strong> <span id="modal-race-date"></span></div>
+    </div>
+
+    <form id="enlist-form" class="space-y-4">
+      <input type="hidden" id="form-race-name" name="race_name" />
+      <input type="hidden" id="form-race-date" name="race_date" />
+
+      <div>
+        <label for="first_name" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">First Name</label>
+        <input
+          type="text"
+          id="first_name"
+          name="first_name"
+          required
+          placeholder="First name"
+          class="w-full bg-slate-50 border border-slate-200 focus:border-black focus:ring-1 focus:ring-black rounded-lg py-2.5 px-4 text-sm text-gray-850 outline-none transition-all duration-300"
+        />
+      </div>
+
+      <div>
+        <label for="last_name" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Last Name</label>
+        <input
+          type="text"
+          id="last_name"
+          name="last_name"
+          required
+          placeholder="Last name"
+          class="w-full bg-slate-50 border border-slate-200 focus:border-black focus:ring-1 focus:ring-black rounded-lg py-2.5 px-4 text-sm text-gray-850 outline-none transition-all duration-300"
+        />
+      </div>
+
+      <div>
+        <label for="email" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          required
+          placeholder="Email address"
+          class="w-full bg-slate-50 border border-slate-200 focus:border-black focus:ring-1 focus:ring-black rounded-lg py-2.5 px-4 text-sm text-gray-850 outline-none transition-all duration-300"
+        />
+      </div>
+
+      <div id="form-message" class="text-xs font-semibold py-2 px-3 rounded-lg hidden"></div>
+
+      <button
+        type="submit"
+        id="submit-btn"
+        class="w-full bg-black hover:bg-slate-800 text-white font-semibold py-3 px-4 rounded-lg shadow-sm transition-all duration-300 text-sm"
+      >
+        Submit Registration
+      </button>
+    </form>
+  </dialog>
+</Layout>
+
+<script>
+  const modal = document.getElementById("register-modal");
+  const closeBtn = document.getElementById("close-modal-btn");
+  const registerBtns = document.querySelectorAll(".register-btn");
+  const form = document.getElementById("enlist-form");
+  const formMessage = document.getElementById("form-message");
+  const submitBtn = document.getElementById("submit-btn");
+
+  const modalRaceName = document.getElementById("modal-race-name");
+  const modalRaceDate = document.getElementById("modal-race-date");
+  const formRaceName = document.getElementById("form-race-name");
+  const formRaceDate = document.getElementById("form-race-date");
+
+  // Open modal and set race details
+  registerBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const name = btn.getAttribute("data-race-name");
+      const date = btn.getAttribute("data-race-date");
+
+      modalRaceName.innerText = name;
+      modalRaceDate.innerText = date ? new Date(date).toLocaleDateString('en-US', { dateStyle: 'medium' }) : 'TBD';
+      formRaceName.value = name;
+      formRaceDate.value = date;
+
+      // Reset form state
+      form.reset();
+      formMessage.classList.add("hidden");
+      formMessage.innerText = "";
+      submitBtn.disabled = false;
+      submitBtn.innerText = "Submit Registration";
+
+      modal.showModal();
+    });
+  });
+
+  // Close modal
+  closeBtn.addEventListener("click", () => {
+    modal.close();
+  });
+
+  // Close when clicking backdrop
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      modal.close();
+    }
+  });
+
+  // Submit handler
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Enlisting...";
+
+    formMessage.classList.add("hidden");
+
+    try {
+      const formData = new FormData(form);
+      const res = await fetch("/api/enlist", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await res.json();
+
+      if (res.ok && result.success) {
+        formMessage.innerText = result.message || "Successfully registered!";
+        formMessage.className = "text-xs font-semibold py-2 px-3 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-250 block";
+        submitBtn.innerText = "Enlisted!";
+        setTimeout(() => {
+          modal.close();
+        }, 1500);
+      } else {
+        formMessage.innerText = result.message || "An error occurred.";
+        formMessage.className = "text-xs font-semibold py-2 px-3 rounded-lg bg-red-50 text-red-700 border border-red-250 block";
+        submitBtn.disabled = false;
+        submitBtn.innerText = "Submit Registration";
+      }
+    } catch (err) {
+      formMessage.innerText = "Failed to submit. Please check connection.";
+      formMessage.className = "text-xs font-semibold py-2 px-3 rounded-lg bg-red-50 text-red-700 border border-red-250 block";
+      submitBtn.disabled = false;
+      submitBtn.innerText = "Submit Registration";
+    }
+  });
+</script>

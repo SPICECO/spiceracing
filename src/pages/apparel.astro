@@ -1,0 +1,274 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+import { fetchRssFeed } from "@/utils/rss";
+
+// 1. Fetch RSS feed items
+const rssProducts = await fetchRssFeed("https://www.artformatics.com/api/boards/spice-shop-dhp8m/rss");
+
+// 2. Fetch Stripe products and prices from Stripe API using secret key
+const stripeSecretKey = import.meta.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
+let stripeProducts = [];
+let stripePrices = [];
+
+if (stripeSecretKey) {
+  try {
+    const productsRes = await fetch("https://api.stripe.com/v1/products?active=true&limit=100", {
+      headers: { "Authorization": `Bearer ${stripeSecretKey}` }
+    });
+    if (productsRes.ok) {
+      const productsJson = await productsRes.json();
+      stripeProducts = productsJson.data || [];
+    }
+
+    const pricesRes = await fetch("https://api.stripe.com/v1/prices?active=true&limit=100", {
+      headers: { "Authorization": `Bearer ${stripeSecretKey}` }
+    });
+    if (pricesRes.ok) {
+      const pricesJson = await pricesRes.json();
+      stripePrices = pricesJson.data || [];
+    }
+  } catch (e) {
+    console.error("Error fetching Stripe data:", e);
+  }
+}
+
+// 3. Map RSS items to Stripe products
+const products = rssProducts.map(rssItem => {
+  const matchedStripeProduct = stripeProducts.find(p => {
+    const stripeNameUpper = p.name.toUpperCase();
+    const rssTitleUpper = rssItem.title.toUpperCase();
+    
+    // Try exact match first
+    if (stripeNameUpper === rssTitleUpper) return true;
+    
+    // Try word-based containment match
+    const rssWords = rssTitleUpper.split(/\s+/).filter(w => w && w !== 'SCARF' && w !== 'JERSEY' && w !== 'JACKET' && w !== 'PANTS' && w !== 'TUBE');
+    if (rssWords.length > 0) {
+      return rssWords.every(word => stripeNameUpper.includes(word));
+    }
+    return false;
+  });
+
+  if (!matchedStripeProduct) {
+    return {
+      title: rssItem.title,
+      image: rssItem.image,
+      content: rssItem.content,
+      isPlaceholder: true
+    };
+  }
+
+  const productPrices = stripePrices.filter(p => p.product === matchedStripeProduct.id);
+  const variants = productPrices.map(price => ({
+    id: price.id,
+    price: (price.unit_amount / 100).toFixed(2),
+    currency: (price.currency || 'EUR').toUpperCase(),
+    rawPrice: price.unit_amount / 100
+  }));
+
+  const sizeOption = matchedStripeProduct.metadata?.size || matchedStripeProduct.metadata?.sizes || matchedStripeProduct.metadata?.Size || matchedStripeProduct.metadata?.Sizes;
+  const sizes = sizeOption ? sizeOption.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  // Gather all unique images (Stripe gallery + all RSS images)
+  const productImages = [];
+  if (matchedStripeProduct.images && matchedStripeProduct.images.length > 0) {
+    productImages.push(...matchedStripeProduct.images);
+  }
+  if (rssItem.images && rssItem.images.length > 0) {
+    rssItem.images.forEach(img => {
+      if (!productImages.includes(img)) {
+        productImages.push(img);
+      }
+    });
+  }
+
+  return {
+    id: matchedStripeProduct.id,
+    title: matchedStripeProduct.name,
+    rssTitle: rssItem.title,
+    images: productImages,
+    content: rssItem.content ? rssItem.content.replace(/<img[^>]*>/gi, '') : (matchedStripeProduct.description || ''),
+    sizes: sizes,
+    variants: variants,
+    price: variants[0] ? `${variants[0].price} ${variants[0].currency}` : 'TBD',
+    priceAmount: variants[0] ? variants[0].rawPrice : 0,
+    priceId: variants[0]?.id || '',
+    isPlaceholder: false
+  };
+});
+
+const actualProducts = products.filter(p => !p.isPlaceholder);
+---
+
+<Layout title="Apparel">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">Apparel Collection</Fragment>
+      <Fragment slot="desc">Exclusive drops and premium streetwear, synced dynamically from Artformatics.</Fragment>
+    </Sectionhead>
+
+    <div class="grid md:grid-cols-3 gap-8 mt-16">
+      {actualProducts.length === 0 ? (
+        <p class="text-center text-slate-500 py-12 col-span-3">No apparel products listed at this time.</p>
+      ) : (
+        actualProducts.map((product) => (
+          <div class="border border-slate-200 rounded-2xl overflow-hidden hover:shadow-md transition-all duration-300 group flex flex-col justify-between bg-white">
+            <div>
+              {product.images && product.images.length > 0 && (
+                <div class="product-image-container" data-product-id={product.id}>
+                  <div class="relative overflow-hidden aspect-[4/5] bg-slate-50 flex items-center justify-center border-b border-slate-100">
+                    <img
+                      src={product.images[0]}
+                      alt={product.title}
+                      class="main-product-image w-full h-full object-contain group-hover:scale-102 transition-transform duration-500"
+                    />
+                  </div>
+                  
+                  {product.images.length > 1 && (
+                    <div class="flex gap-1.5 flex-wrap px-6 pt-3 justify-start z-10">
+                      {product.images.map((img, idx) => (
+                        <button
+                          type="button"
+                          class={`thumbnail-btn w-9 h-11 rounded overflow-hidden border-2 cursor-pointer transition-all duration-200 ${
+                            idx === 0 ? 'border-slate-800 scale-105' : 'border-transparent opacity-70 hover:opacity-100'
+                          }`}
+                          data-image-src={img}
+                        >
+                          <img src={img} class="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div class="p-6">
+                <div class="flex justify-between items-start mb-2 gap-4">
+                  <h3 class="text-lg font-bold text-gray-800 group-hover:text-indigo-650 transition-colors leading-tight">{product.title}</h3>
+                  <span class="text-base font-bold text-slate-900 shrink-0">{product.price}</span>
+                </div>
+                <div class="text-xs text-slate-500 leading-relaxed mb-6" set:html={product.content}></div>
+                
+                {product.sizes && product.sizes.length > 0 && (
+                  <div class="mb-4">
+                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-2">Available Sizes</span>
+                    <div class="flex gap-2 flex-wrap size-selector-group" data-product-id={product.id}>
+                      {product.sizes.map((size, idx) => (
+                        <button
+                          type="button"
+                          class={`size-btn w-8 h-8 rounded border flex items-center justify-center text-xs font-semibold cursor-pointer transition-all duration-200 ${
+                            idx === 0 
+                              ? 'border-black bg-black text-white' 
+                              : 'border-slate-200 text-slate-600 hover:border-black hover:text-black bg-white'
+                          }`}
+                          data-size={size}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div class="p-6 pt-0">
+              <button 
+                class="add-to-cart-btn w-full bg-black hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg shadow-sm transition-all duration-300 text-sm"
+                data-product-id={product.id}
+                data-product-title={product.title}
+                data-price-id={product.priceId}
+                data-price-amount={product.priceAmount}
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  </Container>
+</Layout>
+
+<script>
+  // Image switcher handling
+  document.querySelectorAll('.product-image-container').forEach(container => {
+    const mainImg = container.querySelector('.main-product-image');
+    const thumbBtns = container.querySelectorAll('.thumbnail-btn');
+    
+    thumbBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const targetSrc = btn.getAttribute('data-image-src');
+        if (mainImg && targetSrc) {
+          mainImg.setAttribute('src', targetSrc);
+        }
+        
+        // Update active class styles
+        thumbBtns.forEach(b => {
+          b.classList.remove('border-slate-800', 'scale-105');
+          b.classList.add('border-transparent', 'opacity-70');
+        });
+        btn.classList.add('border-slate-800', 'scale-105');
+        btn.classList.remove('border-transparent', 'opacity-70');
+      });
+    });
+  });
+
+  // Size selection toggling
+  document.querySelectorAll('.size-selector-group').forEach(group => {
+    const buttons = group.querySelectorAll('.size-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => {
+          b.classList.remove('border-black', 'bg-black', 'text-white');
+          b.classList.add('border-slate-200', 'text-slate-600', 'hover:border-black', 'hover:text-black', 'bg-white');
+        });
+        btn.classList.add('border-black', 'bg-black', 'text-white');
+        btn.classList.remove('border-slate-200', 'text-slate-600', 'hover:border-black', 'hover:text-black', 'bg-white');
+      });
+    });
+  });
+
+  // Add to cart click handling
+  document.querySelectorAll('.add-to-cart-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const productId = btn.getAttribute('data-product-id');
+      const productTitle = btn.getAttribute('data-product-title');
+      const defaultPriceId = btn.getAttribute('data-price-id');
+      const priceAmount = parseFloat(btn.getAttribute('data-price-amount') || '0') * 100; // stored in cents
+
+      // Find the selected size button
+      const group = document.querySelector(`.size-selector-group[data-product-id="${productId}"]`);
+      let selectedSize = 'One Size';
+      if (group) {
+        const activeBtn = group.querySelector('.size-btn.bg-black');
+        if (activeBtn) {
+          selectedSize = activeBtn.getAttribute('data-size') || 'One Size';
+        }
+      }
+
+      console.log("ADD TO CART ACTION:", {
+        priceId: defaultPriceId,
+        productId: productId,
+        productTitle: productTitle,
+        price: priceAmount,
+        selectedOptions: { Size: selectedSize }
+      });
+
+      // Show visual confirmation on the button
+      const originalText = btn.innerText;
+      btn.innerText = `Added (${selectedSize})!`;
+      btn.classList.add('bg-emerald-600', 'hover:bg-emerald-700');
+      btn.classList.remove('bg-black', 'hover:bg-slate-800');
+      setTimeout(() => {
+        btn.innerText = originalText;
+        btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-700');
+        btn.classList.add('bg-black', 'hover:bg-slate-800');
+      }, 1500);
+    });
+  });
+</script>

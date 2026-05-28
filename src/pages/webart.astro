@@ -1,0 +1,102 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+import { fetchRssFeed } from "@/utils/rss";
+
+const arts = await fetchRssFeed("https://www.artformatics.com/api/boards/webart-3vpbm/rss");
+const cleanedArts = arts.map(art => {
+  const cleanContent = art.content ? art.content.replace(/<img[^>]*>/gi, '') : (art.description || '');
+  return {
+    ...art,
+    content: cleanContent
+  };
+});
+---
+
+<Layout title="Webart">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">Webart Installations</Fragment>
+      <Fragment slot="desc">Decentralized 3D galleries, interactive installations, and digital artboards parsed from Artformatics.</Fragment>
+    </Sectionhead>
+
+    <div class="grid md:grid-cols-3 gap-8 mt-16">
+      {cleanedArts.length === 0 ? (
+        <p class="text-center text-slate-500 py-12 col-span-3">No Webart installations listed at this time.</p>
+      ) : (
+        cleanedArts.map((art) => (
+          <div class="border border-slate-200 rounded-2xl overflow-hidden hover:shadow-md transition-all duration-300 group flex flex-col justify-between bg-white">
+            <div>
+              {art.images && art.images.length > 0 && (
+                <div class="product-image-container">
+                  <div class="relative overflow-hidden aspect-[4/5] bg-slate-50 flex items-center justify-center border-b border-slate-100">
+                    <img
+                      src={art.images[0]}
+                      alt={art.title}
+                      class="main-product-image w-full h-full object-contain group-hover:scale-102 transition-transform duration-500"
+                    />
+                  </div>
+                  
+                  {art.images.length > 1 && (
+                    <div class="flex gap-1.5 flex-wrap px-6 pt-3 justify-start z-10">
+                      {art.images.map((img, idx) => (
+                        <button
+                          type="button"
+                          class={`thumbnail-btn w-9 h-11 rounded overflow-hidden border-2 cursor-pointer transition-all duration-200 ${
+                            idx === 0 ? 'border-slate-800 scale-105' : 'border-transparent opacity-70 hover:opacity-100'
+                          }`}
+                          data-image-src={img}
+                        >
+                          <img src={img} class="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div class="p-6">
+                <h3 class="text-lg font-bold text-gray-800 group-hover:text-indigo-650 transition-colors mb-2">{art.title}</h3>
+                <div class="text-xs text-slate-650 leading-relaxed mb-6" set:html={art.content}></div>
+              </div>
+            </div>
+
+            <div class="p-6 pt-0">
+              <button class="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-2.5 px-4 rounded-lg transition-all duration-300 text-sm border border-slate-200">
+                View 3D Canvas
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  </Container>
+</Layout>
+
+<script>
+  // Image switcher handling
+  document.querySelectorAll('.product-image-container').forEach(container => {
+    const mainImg = container.querySelector('.main-product-image');
+    const thumbBtns = container.querySelectorAll('.thumbnail-btn');
+    
+    thumbBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const targetSrc = btn.getAttribute('data-image-src');
+        if (mainImg && targetSrc) {
+          mainImg.setAttribute('src', targetSrc);
+        }
+        
+        // Update active class styles
+        thumbBtns.forEach(b => {
+          b.classList.remove('border-slate-800', 'scale-105');
+          b.classList.add('border-transparent', 'opacity-70');
+        });
+        btn.classList.add('border-slate-800', 'scale-105');
+        btn.classList.remove('border-transparent', 'opacity-70');
+      });
+    });
+  });
+</script>

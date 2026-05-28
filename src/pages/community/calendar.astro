@@ -1,0 +1,87 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Container from "@/components/container.astro";
+import Sectionhead from "@/components/sectionhead.astro";
+import { fetchRssFeed } from "@/utils/rss";
+
+const events = await fetchRssFeed("https://www.artformatics.com/api/boards/kalender-chkso/rss");
+
+const formatDate = (dateString) => {
+  try {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return { day: "??", month: "Event" };
+    const month = d.toLocaleString('en-US', { month: 'short' });
+    const day = d.getDate().toString();
+    return { day, month };
+  } catch {
+    return { day: "??", month: "Event" };
+  }
+};
+---
+
+<Layout title="Calendar">
+  <Container>
+    <Sectionhead>
+      <Fragment slot="title">Calendar</Fragment>
+      <Fragment slot="desc">Live events, drops, and community schedules dynamically fetched from Artformatics.</Fragment>
+    </Sectionhead>
+
+    <div class="grid lg:grid-cols-3 gap-12 mt-16">
+      <!-- Event Timeline -->
+      <div class="lg:col-span-2 space-y-6">
+        <h2 class="text-2xl font-bold text-gray-800 border-b border-slate-100 pb-2 mb-6">Upcoming Schedule</h2>
+        {events.length === 0 ? (
+          <p class="text-slate-500 py-6">No events scheduled at the moment.</p>
+        ) : (
+          events.map((event) => {
+            const { day, month } = formatDate(event.pubDate);
+            return (
+              <div class="border border-slate-200 rounded-xl p-6 hover:shadow-md transition-all duration-300 flex gap-6 bg-white">
+                <div class="flex flex-col items-center justify-center bg-slate-50 border border-slate-200 rounded-lg w-16 h-16 shrink-0 shadow-sm">
+                  <span class="text-2xl font-black text-indigo-600 leading-none">{day}</span>
+                  <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500 mt-1">{month}</span>
+                </div>
+                <div class="flex-grow">
+                  <h3 class="text-lg font-bold text-gray-850 hover:text-indigo-600 transition-colors">{event.title}</h3>
+                  <p class="text-sm text-slate-500 mt-2" set:html={event.content}></p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <!-- Sidebar Info -->
+      <div class="space-y-6">
+        <div class="border border-slate-200 rounded-xl p-6 bg-white shadow-sm">
+          <h3 class="text-lg font-bold text-gray-800 border-b border-slate-150 pb-2 mb-4">External Integration</h3>
+          <p class="text-sm text-slate-500 leading-relaxed">
+            We sync our schedule with a public Google Calendar feed. You can subscribe to it to receive automatic updates directly in your preferred calendar application.
+          </p>
+          <div class="mt-6 space-y-3">
+            <a
+              href="https://calendar.google.com/calendar/ical/b9a4dc690cba97af9a9919f8029b67ffe8c66fcc1c61c8466255ee29be22ef8c%40group.calendar.google.com/public/basic.ics"
+              target="_blank"
+              class="flex items-center justify-center gap-2 border border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 py-2.5 px-4 rounded-lg font-semibold transition-all text-sm w-full bg-white shadow-sm"
+            >
+              <span>Import iCal Feed</span>
+            </a>
+            <a
+              href="https://calendar.google.com/calendar/embed?src=b9a4dc690cba97af9a9919f8029b67ffe8c66fcc1c61c8466255ee29be22ef8c%40group.calendar.google.com"
+              target="_blank"
+              class="flex items-center justify-center gap-2 bg-black hover:bg-slate-800 text-white py-2.5 px-4 rounded-lg font-semibold transition-all shadow-sm text-sm w-full"
+            >
+              <span>Open in Web Calendar</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="border border-slate-200 rounded-xl p-6 bg-slate-50 text-xs text-slate-500">
+          <p>
+            * Event times are sync-driven. Be sure to check local daylight saving time offsets.
+          </p>
+        </div>
+      </div>
+    </div>
+  </Container>
+</Layout>

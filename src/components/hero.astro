@@ -1,53 +1,71 @@
 ---
-import { Picture } from "astro:assets";
-import heroImage from "@/assets/hero.png";
+import glbUrl from "@/assets/3dsvg.glb";
 import Link from "@/components/ui/link.astro";
 import { Icon } from "astro-icon/components";
 ---
 
 <main
   class="grid lg:grid-cols-2 place-items-center pt-16 pb-8 md:pt-12 md:pb-24">
-  <div class="py-6 md:order-1 hidden md:block">
-    <Picture
-      src={heroImage}
-      alt="Astronaut in the air"
-      widths={[200, 400, 600]}
-      sizes="(max-width: 800px) 100vw, 620px"
-      loading="eager"
-      format="avif"
-    />
+  <div class="py-6 md:order-1 hidden md:block w-full h-[400px] lg:h-[500px]">
+    <model-viewer
+      src={glbUrl}
+      alt="Spice Co. 3D Model"
+      orientation="-30deg 0deg 70deg"
+      auto-rotate
+      camera-controls
+      touch-action="pan-y"
+      shadow-intensity="1"
+      exposure="1"
+      interaction-prompt="none"
+      class="w-full h-full outline-none"
+      style="--poster-color: transparent;"
+    >
+    </model-viewer>
   </div>
   <div>
     <h1
       class="text-5xl lg:text-6xl xl:text-7xl font-bold lg:tracking-tight xl:tracking-tighter">
-      Marketing website done with Astro
+      16 Zoll Bike Racing Club
     </h1>
     <p class="text-lg mt-4 text-slate-600 max-w-xl">
-      Astroship is a starter template for startups, marketing websites & landing
-      pages.<wbr /> Built with Astro.build and TailwindCSS. You can quickly create
-      any website with this starter.
+      Welcome to Spice Co. World—the home of the funnest 16-inch wheel bike racing community. We ride hard, spin small wheels, host micro-cup races, and drop custom apparel.
     </p>
     <div class="mt-6 flex flex-col sm:flex-row gap-3">
       <Link
-        href="#"
-        href="https://web3templates.com/templates/astroship-starter-website-template-for-astro"
-        target="_blank"
-        class="flex gap-1 items-center justify-center"
-        rel="noopener">
-        <Icon class="text-white w-5 h-5" name="bx:bxs-cloud-download" />
-
-        Download for Free
+        href="/community/racing"
+        class="flex gap-1 items-center justify-center">
+        <Icon class="text-white w-5 h-5" name="bx:bxs-flag-alt" />
+        Upcoming Races
       </Link>
       <Link
         size="lg"
         style="outline"
-        rel="noopener"
-        href="https://github.com/surjithctly/astroship"
-        class="flex gap-1 items-center justify-center"
-        target="_blank">
-        <Icon class="text-black w-4 h-4" name="bx:bxl-github" />
-        GitHub Repo
+        href="/apparel"
+        class="flex gap-1 items-center justify-center">
+        <Icon class="text-black w-4 h-4" name="bx:bxs-shopping-bag" />
+        Shop Apparel
       </Link>
     </div>
   </div>
 </main>
+
+<script is:inline type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+
+<script>
+  const modelViewer = document.querySelector("model-viewer");
+  if (modelViewer) {
+    const makeDoubleSided = () => {
+      if (modelViewer.model && modelViewer.model.materials) {
+        modelViewer.model.materials.forEach((material) => {
+          material.setDoubleSided(true);
+        });
+      }
+    };
+
+    if (modelViewer.loaded) {
+      makeDoubleSided();
+    } else {
+      modelViewer.addEventListener("load", makeDoubleSided);
+    }
+  }
+</script>
